@@ -15,8 +15,6 @@
 #include "../../Libraries/Headers/lcd.h"
 #include "../HEADERS/termo.h"
 
-
-
 /* DEFINITHIONS */
 #define BTN_PLUS (!(PINB & 0x1))
 #define BTN_MINUS (!(PINB & 0x2))
@@ -33,19 +31,22 @@ void MainLoop();
 
 void ALARM();
 
+void ALARM2();
+
 void Lamp(bool mode);
 
 void beep(uint16_t time, uint16_t delay);
 
 /* DECLARATIONS VARIABLES*/
 uint16_t minTemp = 0;
-uint16_t maxTemp=0;
-uint16_t actTemp=0;
+uint16_t maxTemp = 0;
+uint16_t actTemp = 0;
 uint16_t thermoD0 = 4;
 uint16_t thermoCS = 5;
 uint16_t thermoCLK = 6;
+bool overTempLock = false;
 bool mute = false;
-uint8_t histerezeLock = 0;
+uint8_t histereze = 0;
 uint16_t lcdRefreshClock = 0;
 
 /* MAIN PROGRAM */
@@ -75,21 +76,25 @@ void Initialization() {
 	beep(600, 300);
 	beep(600, 200);
 	Lamp(false);
-	while(true){
-		if(lcdRefreshClock >= LCD_REFRESH_TIME){
+
+
+	while (true) {
+		if (lcdRefreshClock >= LCD_REFRESH_TIME) {
 			LCD_Clear();
 			LCD_XYPrintf(0, 0, "Min temp");
 			LCD_XYPrintf(0, 1, ": %d", minTemp);
 			lcdRefreshClock = 0;
 		}
-		if(BTN_PLUS && minTemp < MAXIMUM_TEMPERATURE) {
+		if (BTN_PLUS && minTemp < MAXIMUM_TEMPERATURE) {
 			minTemp++;
 			DELAY_ms(BUTTON_PRESS_DELAY);
 		}
-		if(BTN_MINUS && minTemp > MINIMUM_TEMPERATURE)  {
+		if (BTN_MINUS && minTemp > MINIMUM_TEMPERATURE) {
 			minTemp--;
 			DELAY_ms(BUTTON_PRESS_DELAY);
-		}if(BTN_OK) break;
+		}
+		if (BTN_OK)
+			break;
 		lcdRefreshClock++;
 	}
 	LCD_Clear();
@@ -98,23 +103,48 @@ void Initialization() {
 	DELAY_ms(200);
 	maxTemp = minTemp;
 
-	while(!BTN_OK){
-		if(lcdRefreshClock >= LCD_REFRESH_TIME){
+	while (!BTN_OK) {
+		if (lcdRefreshClock >= LCD_REFRESH_TIME) {
 			LCD_Clear();
 			LCD_XYPrintf(0, 0, "Max temp");
 			LCD_XYPrintf(0, 1, ": %d", maxTemp);
 			lcdRefreshClock = 0;
 		}
-		if(BTN_PLUS && maxTemp < MAXIMUM_TEMPERATURE) {
+		if (BTN_PLUS && maxTemp < MAXIMUM_TEMPERATURE) {
 			maxTemp++;
 			DELAY_ms(BUTTON_PRESS_DELAY);
 		}
-		if(BTN_MINUS && maxTemp > MINIMUM_TEMPERATURE && maxTemp > minTemp)  {
+		if (BTN_MINUS && maxTemp > MINIMUM_TEMPERATURE && maxTemp > minTemp) {
 			maxTemp--;
 			DELAY_ms(BUTTON_PRESS_DELAY);
 		}
 		lcdRefreshClock++;
 	}
+
+	LCD_Clear();
+	LCD_XYPrintf(0, 0, "OK");
+	beep(3000, 100);
+	DELAY_ms(200);
+
+	while (!BTN_OK) {
+		if (lcdRefreshClock >= LCD_REFRESH_TIME) {
+			LCD_Clear();
+			LCD_XYPrintf(0, 0, "histerez");
+			LCD_XYPrintf(0, 1, "e: %d", histereze);
+			lcdRefreshClock = 0;
+		}
+		if (BTN_PLUS) {
+			histereze++;
+			DELAY_ms(BUTTON_PRESS_DELAY * 3);
+		}
+		if (BTN_MINUS && histereze > 0) {
+			histereze--;
+			DELAY_ms(BUTTON_PRESS_DELAY * 3);
+		}
+		lcdRefreshClock++;
+	}
+
+
 	LCD_Clear();
 	LCD_XYPrintf(0, 0, "OK");
 	beep(3000, 100);
@@ -128,49 +158,70 @@ void Initialization() {
 
 void MainLoop() {
 	LCD_Clear();
-	lcdRefreshClock=0;
-while(true){
-	if(lcdRefreshClock >= 1){
-		LCD_Clear();
-		if(actTemp != -100) LCD_XYPrintf(0, 0, "TEMP:%d", actTemp);
-		else  {
-			LCD_XYPrintf(0, 0, "TEMP:ERR");
-			Lamp(true);
+	lcdRefreshClock = 0;
+	overTempLock = false;
+	while (true) {
+		if (lcdRefreshClock >= 1) {
+			LCD_Clear();
+			if (actTemp != -100)
+				LCD_XYPrintf(0, 0, "TEMP:%d", actTemp);
+			else {
+				LCD_XYPrintf(0, 0, "TEMP:ERR");
+				Lamp(true);
+			}
+			LCD_XYPrintf(0, 1, " %d/%d", minTemp, maxTemp);
+			lcdRefreshClock = 0;
+			//beep(200, 600);
+		} else
+			lcdRefreshClock++;
+		actTemp = readCelsius();
+
+		if ((actTemp > (maxTemp + histereze) || actTemp < (minTemp - histereze))
+				&& overTempLock == false) {
+			overTempLock = true;
+			mute = false;
 		}
-		LCD_XYPrintf(0, 1, " %d/%d", minTemp, maxTemp);
-		lcdRefreshClock = 0;
-		//beep(200, 600);
+
+		if (overTempLock == true) {
+			Lamp(true);
+			if (!mute){
+			if(actTemp > (maxTemp + histereze + 20) || actTemp < (minTemp - histereze - 20)) ALARM2();
+			else ALARM();
+			}
+			if (BTN_OK)
+				mute = true;
+		}
+
+		if (actTemp < maxTemp && actTemp > minTemp) {
+			overTempLock = false;
+			mute = true;
+			Lamp(false);
+		}
 	}
-	else lcdRefreshClock++;
-	actTemp = readCelsius();
-	if((actTemp > maxTemp || actTemp < minTemp) && (histerezeLock == 0 || histerezeLock == 1)){
-		Lamp(true);
-		histerezeLock = 1;
-		if(!mute) ALARM();
-		if(BTN_OK) mute=true;
-	}
-	else {
-		mute=false;
-		Lamp(false);
-		if(histerezeLock == 1) histerezeLock =2;
-		if(actTemp < maxTemp-1 && actTemp > minTemp +1)histerezeLock=0;
-	}
-}
 }
 
 void ALARM() {
-	beep(500, 100);
 	beep(500, 200);
+	beep(500, 400);
 
 }
 
-void Lamp(bool mode){
-	if(!mode) PORTD |= (1 << 1);
-	else PORTD &= (0 << 1);
+void ALARM2() {
+	beep(500, 100);
+	beep(500, 50);
+	beep(500, 150);
+
 }
 
-void beep(uint16_t time, uint16_t delay){
-	for(int clk=0;clk<time;clk++){
+void Lamp(bool mode) {
+	if (!mode)
+		PORTD |= (1 << 1);
+	else
+		PORTD &= (0 << 1);
+}
+
+void beep(uint16_t time, uint16_t delay) {
+	for (int clk = 0; clk < time; clk++) {
 		PORTD &= (0 << 0);
 		DELAY_us(delay);
 		PORTD |= (1 << 0);
